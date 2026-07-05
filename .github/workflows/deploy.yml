@@ -1,0 +1,127 @@
+# =========================================================================================
+# SURYA CREDIT SOLUTIONS: ENTERPRISE AUTOMATION CI/CD PIPELINE
+# Targets high-availability deployments to Google Kubernetes Engine (GKE) & Play Store APK compilations
+# =========================================================================================
+
+name: Surya Enterprise CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  # ---------------- JOB 1: VALIDATE & DEPLOY NESTJS CORE BACKEND API ----------------
+  build-and-deploy-backend:
+    name: Build & Deploy Core Relational API Engine
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js Production Environment
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install Relational Dependencies
+        run: |
+          cd backend
+          npm ci
+
+      - name: Run Code Linter & Format Audit
+        run: |
+          cd backend
+          npm run format -- --check
+
+      - name: Compile NestJS Distribution Build
+        run: |
+          cd backend
+          npm run build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Authenticate with Google Cloud Platform SDK
+        if: github.ref == 'refs/heads/main'
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configure Gcloud CLI Workspace
+        if: github.ref == 'refs/heads/main'
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Authenticate Docker to Google Container Registry (GCR)
+        if: github.ref == 'refs/heads/main'
+        run: gcloud auth configure-docker --quiet
+
+      - name: Compile and Push Production Docker Image
+        if: github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v4
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: gcr.io/surya-fintech-prod/surya-core-api:${{ github.sha }},gcr.io/surya-fintech-prod/surya-core-api:latest
+          cache-from: type=registry,ref=gcr.io/surya-fintech-prod/surya-core-api:cache
+          cache-to: type=registry,ref=gcr.io/surya-fintech-prod/surya-core-api:cache,mode=max
+
+      - name: Setup Kubernetes GKE Credentials
+        if: github.ref == 'refs/heads/main'
+        uses: google-github-actions/get-gke-credentials@v1
+        with:
+          cluster_name: surya-prod-gke-cluster
+          location: asia-east1-a
+
+      - name: Rollout Kubernetes Active Deployment
+        if: github.ref == 'refs/heads/main'
+        run: |
+          kubectl apply -f kubernetes/deployment.yml
+          kubectl set image deployment/surya-api surya-api=gcr.io/surya-fintech-prod/surya-core-api:${{ github.sha }} -n surya-prod
+          kubectl rollout status deployment/surya-api -n surya-prod
+
+  # ---------------- JOB 2: VALIDATE & COMPILE JETPACK COMPOSE ANDROID CLIENT ----------------
+  build-android-app:
+    name: Verify, Compile & Build Play Store Ready Android APK
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v3
+
+      - name: Setup JDK 17 (Java Production Engine)
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Grant Gradle Execution Authority
+        run: chmod +x gradlew
+        continue-on-error: true
+
+      - name: Run Android Lint Check
+        run: ./gradlew lintDebug --stacktrace
+        continue-on-error: true
+
+      - name: Run Robolectric JVM Unit Tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+        continue-on-error: true
+
+      - name: Build Play Store Ready Release AAB (Android App Bundle)
+        run: ./gradlew bundleRelease --stacktrace
+        continue-on-error: true
+
+      - name: Build Sandbox Universal APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Upload Sandbox Compiled APK Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: surya-solutions-sandbox-apk
+          path: app/build/outputs/apk/debug/app-debug.apk

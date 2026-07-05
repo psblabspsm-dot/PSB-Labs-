@@ -1,0 +1,6 @@
+apiVersion: v2
+name: surya-credit-solutions
+description: A Helm chart for deploying Surya Credit Solutions enterprise-grade fintech ecosystem on Kubernetes.
+type: application
+version: 1.0.0
+appVersion: "1.4.0"

@@ -1,0 +1,62 @@
+# Default values for surya-credit-solutions.
+# This is a YAML-formatted file.
+
+replicaCount: 3
+
+image:
+  repository: gcr.io/surya-fintech-prod/surya-core-api
+  pullPolicy: Always
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: api.suryacredit.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: surya-tls-certs
+      hosts:
+        - api.suryacredit.com
+
+resources:
+  limits:
+    cpu: "1.5"
+    memory: 1.5Gi
+  requests:
+    cpu: "500m"
+    memory: 768Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+
+# Environment variables
+env:
+  NODE_ENV: "production"
+  PORT: "3000"
+  DATABASE_URL: "postgresql://surya_admin:SuryaPassWord2026@postgres-service:5432/surya_db?schema=public&sslmode=prefer"
+  REDIS_URL: "redis://redis-service:6379"
+
+# Postgres Database Settings (StatefulSet)
+postgres:
+  storage: 50Gi
+  resources:
+    limits:
+      cpu: "1"
+      memory: 2Gi
+    requests:
+      cpu: "500m"
+      memory: 1Gi

@@ -1,0 +1,6 @@
+{
+  "name": "Surya Credit",
+  "description": "Enterprise B2B FinTech & E-Commerce platform featuring wallets, credit lines, bills, orders, and real-time AI assistance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  # NestJS Core API Engine
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://surya_admin:SuryaPassWord2026@postgres:5432/surya_db?schema=public
+      - JWT_SECRET=SURYA_CREDIT_SECURE_KEY_2026
+      - REDIS_URL=redis://redis:6379
+      - PORT=3000
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - surya-network
+
+  # Relational PostgreSQL Database Engine (Prisma targets this)
+  postgres:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=surya_admin
+      - POSTGRES_PASSWORD=SuryaPassWord2026
+      - POSTGRES_DB=surya_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - surya-network
+
+  # High-availability Memory Ledger Cache (Rate limit and sessions)
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    networks:
+      - surya-network
+
+networks:
+  surya-network:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:

@@ -1,0 +1,1120 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// User Roles representing multi-tenant participants in Surya B2B FinTech network.
+enum Role {
+  SUPER_DISTRIBUTOR
+  DISTRIBUTOR
+  RETAILER
+  EMPLOYEE
+  ADMIN
+  CUSTOMER
+}
+
+/// KYC Document Verification Status
+enum KycStatus {
+  PENDING
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+/// Transaction Types representing double-entry ledger bookkeeping
+enum TransactionType {
+  CREDIT      // Wallet top-up, loan disbursement, credit line update
+  DEBIT       // Service payments, procurement purchases, wallet withdrawals
+  COMMISSION  // Earnings allocated to Distributors or Retailers on transaction routing
+  CASHBACK    // Promotional rewards credited to users
+}
+
+/// Service Categories for transaction routing
+enum ServiceType {
+  RECHARGE
+  BBPS        // Bharat Bill Payment System (Electricity, Gas, Water)
+  AEPS        // Aadhaar Enabled Payment System
+  DMT         // Domestic Money Transfer (IMPS)
+  CREDIT_PAY  // Repayment of outstanding B2B credit line dues
+  QR_PAY      // Dynamic UPI QR code scanning
+  ORDER       // B2B Hardware procurement
+}
+
+/// Shipping and fulfillment status for B2B procurement
+enum ShippingStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+/// Master User Entity
+model User {
+  id             String         @id @default(uuid())
+  email          String         @unique
+  phoneNumber    String         @unique
+  passwordHash   String
+  fullName       String
+  role           Role           @default(RETAILER)
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  // Multi-tenant organizational mapping
+  parentId       String?        // Map Retailer -> Distributor, or Distributor -> Super Distributor
+  parent         User?          @relation("UserHierarchy", fields: [parentId], references: [id])
+  children       User[]         @relation("UserHierarchy")
+
+  // Associated Profiles and Records
+  wallet         Wallet?
+  creditWallet   CreditWallet?
+  kycDoc         KycDocument?
+  orders         Order[]        @relation("UserOrders")
+  assignedTickets SimpleSupportTicket[] @relation("EmployeeTickets")
+  raisedTickets   SimpleSupportTicket[] @relation("UserTickets")
+  notifications  Notification[]
+  auditLogs      AuditLog[]
+
+  // SSO Credentials (Google/Microsoft OAuth2)
+  googleId       String?        @unique
+  microsoftId    String?        @unique
+
+  // Explicit Sub-Profiles
+  distributorProfile Distributor?
+  retailerProfile    Retailer?
+  employeeProfile    Employee?
+
+  @@index([role])
+  @@index([parentId])
+}
+
+/// Dynamic Distributor Profile
+model Distributor {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gstNumber    String?  @unique
+  region       String
+  tier         String   @default("SILVER") // SILVER, GOLD, PLATINUM
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+/// Dynamic Retailer Profile
+model Retailer {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shopName     String
+  latitude     Double?
+  longitude    Double?
+  isKioskActive Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+/// Dynamic Employee Profile
+model Employee {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department   String
+  designation  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+/// Wallet and B2B Credit Limit Management (Ledger Central)
+model Wallet {
+  id               String         @id @default(uuid())
+  userId           String         @unique
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  balance          Decimal        @default(0.00) @db.Decimal(15, 2)
+  commissionEarned Decimal        @default(0.00) @db.Decimal(15, 2)
+  cashbackEarned   Decimal        @default(0.00) @db.Decimal(15, 2)
+  
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  transactions     WalletTransaction[]
+}
+
+/// Credit Wallet Line for Multi-Tenant Credit Allocation
+model CreditWallet {
+  id               String         @id @default(uuid())
+  userId           String         @unique
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  creditLimit      Decimal        @default(0.00) @db.Decimal(15, 2)
+  usedCredit       Decimal        @default(0.00) @db.Decimal(15, 2)
+  interestRate     Decimal        @default(12.00) @db.Decimal(5, 2) // Per-annum dynamic rate
+  repaymentCycle   Int            @default(15) // Days to settle
+  isActive         Boolean        @default(true)
+
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  creditLimitsHistory CreditLimit[]
+}
+
+/// Historic logs for credit limit upgrades and adjustments
+model CreditLimit {
+  id             String        @id @default(uuid())
+  creditWalletId String
+  creditWallet   CreditWallet  @relation(fields: [creditWalletId], references: [id], onDelete: Cascade)
+  previousLimit  Decimal       @db.Decimal(15, 2)
+  newLimit       Decimal       @db.Decimal(15, 2)
+  updatedBy      String        // Admin ID
+  reason         String
+  createdAt      DateTime      @default(now())
+}
+
+/// Detailed Double-Entry Auditable Wallet Transactions
+model WalletTransaction {
+  id             String           @id @default(uuid())
+  walletId       String
+  wallet         Wallet           @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  
+  type           TransactionType
+  service        ServiceType
+  amount         Decimal          @db.Decimal(15, 2)
+  description    String
+  status         String           @default("SUCCESS") // SUCCESS, PENDING, FAILED
+  referenceId    String           @unique // Unique bank RRN or gateway transaction ref
+  paymentMethod  String           @default("WALLET")  // WALLET, CREDIT_LINE, UPI, GATEWAY
+  
+  cgst           Decimal          @default(0.00) @db.Decimal(10, 2) // CGST Component (9% for services)
+  sgst           Decimal          @default(0.00) @db.Decimal(10, 2) // SGST Component (9% for services)
+  commissionAmt  Decimal          @default(0.00) @db.Decimal(10, 2) // Commission shared to distributor/retailer
+
+  createdAt      DateTime         @default(now())
+
+  invoice        Invoice?
+  payments       Payment[]
+
+  @@index([walletId])
+  @@index([referenceId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+/// B2B Procurement Categories
+model Category {
+  id             String           @id @default(uuid())
+  name           String           @unique
+  description    String?
+  createdAt      DateTime         @default(now())
+  products       Product[]
+}
+
+/// B2B Procurement Products
+model Product {
+  id             String           @id @default(uuid())
+  categoryId     String
+  category       Category         @relation(fields: [categoryId], references: [id])
+  name           String
+  sku            String           @unique
+  description    String?
+  price          Decimal          @db.Decimal(15, 2)
+  gstRate        Int              @default(18) // GST percentage (e.g. 18%)
+  vendorId       String
+  vendor         Vendor           @relation(fields: [vendorId], references: [id])
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  inventory      Inventory?
+  orderItems     OrderItem[]
+
+  @@index([categoryId])
+}
+
+/// Inventory Tracking
+model Inventory {
+  id             String           @id @default(uuid())
+  productId      String           @unique
+  product        Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  stockCount     Int              @default(0)
+  warehouseLocation String
+  reorderPoint   Int              @default(5)
+  updatedAt      DateTime         @updatedAt
+}
+
+/// Hardware/Device Suppliers and Vendors
+model Vendor {
+  id             String           @id @default(uuid())
+  name           String           @unique
+  contactPerson  String
+  email          String           @unique
+  phoneNumber    String           @unique
+  address        String
+  products       Product[]
+  createdAt      DateTime         @default(now())
+}
+
+/// B2B Procurement Orders for Kiosk Hardware & Accessories
+model Order {
+  id             String           @id @default(uuid())
+  buyerId        String
+  buyer          User             @relation("UserOrders", fields: [buyerId], references: [id])
+  
+  totalAmount    Decimal          @db.Decimal(15, 2)
+  status         ShippingStatus   @default(PENDING)
+  paymentMethod  String           // WALLET, CREDIT_LINE, GATEWAY
+  
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  items          OrderItem[]
+  invoice        Invoice?
+  payments       Payment[]
+
+  @@index([buyerId])
+}
+
+/// Detailed B2B Order Items
+model OrderItem {
+  id             String           @id @default(uuid())
+  orderId        String
+  order          Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  productId      String
+  product        Product          @relation(fields: [productId], references: [id])
+  unitPrice      Decimal          @db.Decimal(15, 2)
+  quantity       Int
+  gstRate        Int              @default(18)
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+/// Payment Gateway Transactions (Razorpay, Cashfree, Pine Labs, CCAvenue, Paytm, Zaakpay)
+model Payment {
+  id             String           @id @default(uuid())
+  amount         Decimal          @db.Decimal(15, 2)
+  gateway        String           // RAZORPAY, CASHFREE, PINELABS, CCAVENUE, PAYTM, ZAAKPAY
+  gatewayTxnId   String           @unique
+  status         String           @default("PENDING") // PENDING, SUCCESS, FAILED, REFUNDED
+  
+  // Associations
+  orderId        String?
+  order          Order?           @relation(fields: [orderId], references: [id])
+  transactionId  String?
+  transaction    WalletTransaction? @relation(fields: [transactionId], references: [id])
+
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  paymentLogs    PaymentLog[]
+
+  @@index([gateway])
+  @@index([gatewayTxnId])
+}
+
+/// Complete Webhook & Telemetry payload logs for Payments
+model PaymentLog {
+  id             String           @id @default(uuid())
+  paymentId      String
+  payment        Payment          @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  event          String           // payment.captured, payment.failed, payout.processed
+  rawPayload     String           @db.Text
+  createdAt      DateTime         @default(now())
+}
+
+/// Regulatory KYC Merchant Compliance Profile
+model KycDocument {
+  id             String           @id @default(uuid())
+  userId         String           @unique
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  businessName   String
+  panNumber      String           @unique // 10 Digit Alphanumeric
+  gstNumber      String?          @unique // 15 Digit Alphanumeric
+  aadhaarNumber  String           // 12 Digit UID
+  status         KycStatus        @default(PENDING)
+  
+  verifiedAt     DateTime?
+  verifiedById   String?          // Admin/Employee ID who reviewed and approved KYC
+  rejectionReason String?
+
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([status])
+}
+
+/// Digital Invoices with itemized tax breakdowns (CGST/SGST/IGST)
+model Invoice {
+  id             String           @id @default(uuid())
+  invoiceNumber  String           @unique // e.g. SURYA/2026/00001
+  
+  orderId        String?          @unique
+  order          Order?           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  transactionId  String?          @unique
+  transaction    WalletTransaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  
+  taxableAmount  Decimal          @db.Decimal(15, 2)
+  cgstAmount     Decimal          @db.Decimal(15, 2) // Central GST
+  sgstAmount     Decimal          @db.Decimal(15, 2) // State GST
+  igstAmount     Decimal          @db.Decimal(15, 2) // Integrated GST
+  totalAmount    Decimal          @db.Decimal(15, 2) // Grand Total (Taxable + Taxes)
+  
+  createdAt      DateTime         @default(now())
+
+  gstRecords     GstRecord[]
+
+  @@index([invoiceNumber])
+}
+
+/// Tax Audit compliance records (GST Ledger)
+model GstRecord {
+  id             String           @id @default(uuid())
+  invoiceId      String
+  invoice        Invoice          @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  gstin          String           // Customer/Merchant GSTIN
+  rate           Int              @default(18)
+  cgst           Decimal          @db.Decimal(15, 2)
+  sgst           Decimal          @db.Decimal(15, 2)
+  igst           Decimal          @db.Decimal(15, 2)
+  filedAt        DateTime?
+  status         String           @default("UNFILED") // UNFILED, FILED, AUDITED
+  createdAt      DateTime         @default(now())
+}
+
+/// Commissions Splitting Matrix
+model Commission {
+  id             String           @id @default(uuid())
+  serviceType    ServiceType
+  agentRole      Role
+  slabMin        Decimal          @db.Decimal(15, 2)
+  slabMax        Decimal          @db.Decimal(15, 2)
+  percentComm    Decimal          @db.Decimal(5, 2) // Percentage commission (e.g. 3.20%)
+  flatComm       Decimal          @db.Decimal(10, 2) // Flat payout commission (e.g. 12.00)
+  createdAt      DateTime         @default(now())
+}
+
+/// Bank Settlement records for Cash out/Withdrawals
+model Settlement {
+  id             String           @id @default(uuid())
+  beneficiaryName String
+  bankName       String
+  accountNumber  String
+  ifscCode       String
+  amount         Decimal          @db.Decimal(15, 2)
+  status         String           @default("PENDING") // PENDING, PROCESSING, SUCCESS, FAILED
+  referenceId    String?          @unique // IMPS RRN
+  createdAt      DateTime         @default(now())
+}
+
+/// Global dynamic reports configuration
+model Report {
+  id             String           @id @default(uuid())
+  title          String
+  type           String           // TRANSACTION, SALES, REVENUE, COMMISSIONS
+  generatedBy    String           // User ID who created the report
+  downloadUrl    String
+  createdAt      DateTime         @default(now())
+}
+
+/// Support and Ticket raising system
+model SimpleSupportTicket {
+  id             String           @id @default(uuid())
+  subject        String
+  description    String
+  status         String           @default("OPEN") // OPEN, IN_PROGRESS, RESOLVED, CLOSED
+  priority       String           @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  
+  userId         String           // User who raised the issue
+  user           User             @relation("UserTickets", fields: [userId], references: [id])
+  
+  employeeId     String?          // Customer support agent assigned
+  employee       User?            @relation("EmployeeTickets", fields: [employeeId], references: [id])
+
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([userId])
+  @@index([employeeId])
+  @@index([status])
+}
+
+/// Notification alerts hub
+model Notification {
+  id             String           @id @default(uuid())
+  userId         String
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String
+  message        String
+  type           String           @default("INFO") // INFO, SUCCESS, WARNING, DANGER
+  isRead         Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+
+  @@index([userId])
+}
+
+/// Master System Audit Logs
+model AuditLog {
+  id             String           @id @default(uuid())
+  userId         String?
+  user           User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action         String           // LOGIN, CREATE_USER, ADJUST_LIMIT
+  ipAddress      String?
+  userAgent      String?
+  metadata       String?          @db.Text
+  createdAt      DateTime         @default(now())
+
+  @@index([userId])
+  @@index([action])
+}
+
+/// Tenant Model
+model Tenant {
+  id             String         @id @default(uuid())
+  name           String
+  subdomain      String         @unique
+  domain         String?        @unique
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  settings       TenantSettings?
+  branding       TenantBranding?
+  domains        TenantDomain[]
+  subscriptions  TenantSubscription[]
+  featureFlags   FeatureFlag?
+  users          TenantUser[]
+  roles          TenantRole[]
+  activityLogs   TenantActivityLog[]
+  webhookLogs    WebhookLog[]
+}
+
+/// Tenant Settings
+model TenantSettings {
+  id                  String   @id @default(uuid())
+  tenantId            String   @unique
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  kycAutoApprove      Boolean  @default(true)
+  autoIncreaseCredit  Boolean  @default(true)
+  dailyBiReports      Boolean  @default(true)
+  commissionSettle    Boolean  @default(true)
+  lowCreditSms        Boolean  @default(true)
+  invoiceMail         Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+/// Tenant Branding Settings
+model TenantBranding {
+  id                 String   @id @default(uuid())
+  tenantId           String   @unique
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  companyName        String
+  logoUrl            String?
+  splashScreenUrl    String?
+  appIconUrl         String?
+  primaryColor       String   @default("#0F172A")
+  secondaryColor     String   @default("#38BDF8")
+  fontName           String   @default("Inter")
+  emailTemplate      String?  @db.Text
+  smsTemplate        String?  @db.Text
+  invoiceBranding    String?  @db.Text
+  receiptBranding    String?  @db.Text
+  termsAndConditions String?  @db.Text
+  privacyPolicy      String?  @db.Text
+  supportEmail       String?
+  supportPhone       String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+/// Custom domains mapped to Tenant
+model TenantDomain {
+  id             String   @id @default(uuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  domain         String   @unique
+  isVerified     Boolean  @default(false)
+  sslStatus      String   @default("PENDING") // PENDING, ACTIVE, EXPIRED
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+/// SaaS Subscription Plan
+model SubscriptionPlan {
+  id                String               @id @default(uuid())
+  name              String               @unique // FREE, STARTER, PROFESSIONAL, ENTERPRISE
+  description       String
+  monthlyPrice      Decimal              @db.Decimal(10, 2)
+  annualPrice       Decimal              @db.Decimal(10, 2)
+  trialDays         Int                  @default(14)
+  limitUsers        Int                  @default(5)
+  limitTransactions Int                  @default(1000)
+  limitVolume       Decimal              @db.Decimal(15, 2) @default(100000.00)
+  createdAt         DateTime             @default(now())
+  subscriptions     TenantSubscription[]
+}
+
+/// Tenant Subscription Mapping
+model TenantSubscription {
+  id             String           @id @default(uuid())
+  tenantId       String
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  planId         String
+  plan           SubscriptionPlan @relation(fields: [planId], references: [id])
+  billingCycle   String           // MONTHLY, ANNUAL
+  price          Decimal          @db.Decimal(10, 2)
+  startDate      DateTime         @default(now())
+  endDate        DateTime
+  status         String           @default("ACTIVE") // ACTIVE, TRIAL, SUSPENDED, EXPIRED
+  autoRenew      Boolean          @default(true)
+  nextBillingDate DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+}
+
+/// SaaS Feature Flags per Tenant
+model FeatureFlag {
+  id                 String   @id @default(uuid())
+  tenantId           String   @unique
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  marketplaceEnabled Boolean  @default(true)
+  walletEnabled      Boolean  @default(true)
+  creditEnabled      Boolean  @default(true)
+  aepsEnabled        Boolean  @default(true)
+  dmtEnabled         Boolean  @default(true)
+  bbpsEnabled        Boolean  @default(true)
+  rechargeEnabled    Boolean  @default(true)
+  panEnabled         Boolean  @default(true)
+  insuranceEnabled   Boolean  @default(true)
+  travelEnabled      Boolean  @default(true)
+  loansEnabled       Boolean  @default(true)
+  crmEnabled         Boolean  @default(true)
+  aiEnabled          Boolean  @default(true)
+  analyticsEnabled   Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+/// Tenant Users mapping
+model TenantUser {
+  id             String   @id @default(uuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId         String
+  tenantRoleId   String
+  tenantRole     TenantRole @relation(fields: [tenantRoleId], references: [id])
+  createdAt      DateTime @default(now())
+
+  @@unique([tenantId, userId])
+}
+
+/// Tenant Role (RBAC per Tenant)
+model TenantRole {
+  id             String   @id @default(uuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name           String   // ADMIN, MANAGER, OPERATOR
+  permissions    String   // JSON string of permissions
+  description    String?
+  createdAt      DateTime @default(now())
+  users          TenantUser[]
+
+  @@unique([tenantId, name])
+}
+
+/// Tenant Activity Logs for SaaS auditability
+model TenantActivityLog {
+  id             String   @id @default(uuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId         String?
+  action         String
+  category       String   // SECURITY, BILLING, SETTING_CHANGE
+  metadata       String?  @db.Text
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+}
+
+/// Webhook Debugger Logs
+model WebhookLog {
+  id                  String   @id @default(uuid())
+  tenantId            String
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  eventType           String   // e.g. payment.captured, payout.processed
+  rawPayload          String   @db.Text
+  signatureHeader     String?
+  signatureValid      Boolean  @default(false)
+  deliveryStatus      String   // SUCCESS, FAILED
+  retryCount          Int      @default(0)
+  errorMessage        String?  @db.Text
+  retryLogs           String?  @db.Text // JSON string of retries
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+/// Support Ticket Model
+model SupportTicket {
+  id             String             @id @default(uuid())
+  ticketNumber   String             @unique // Auto increment-like pattern, e.g., TKT-1001
+  tenantId       String
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId     String
+  customerRole   String             // CUSTOMER, RETAILER, DISTRIBUTOR, VENDOR, FRANCHISE, EMPLOYEE
+  subject        String
+  description    String             @db.Text
+  category       String             // WALLET, TRANSACTION, LOANS, TECH_SUPPORT, BILLING
+  priority       String             @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  status         String             @default("OPEN") // OPEN, PENDING, ESCALATED, RESOLVED, CLOSED
+  assignedAgentId String?
+  department     String             @default("GENERAL") // GENERAL, WALLET_BIZ, RECOVERY, COMPLIANCE
+  slaDueDate     DateTime?
+  satisfactionRating Int?           // 1 to 5 stars CSAT
+  resolutionNotes String?           @db.Text
+  mergedIntoId   String?            // ID of parent ticket if merged
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  replies        TicketReply[]
+  attachments    TicketAttachment[]
+}
+
+/// Ticket Reply
+model TicketReply {
+  id             String             @id @default(uuid())
+  ticketId       String
+  ticket         SupportTicket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  senderId       String
+  senderName     String
+  senderRole     String             // AGENT, CUSTOMER
+  message        String             @db.Text
+  isInternalNote Boolean            @default(false)
+  createdAt      DateTime           @default(now())
+}
+
+/// Ticket Attachment
+model TicketAttachment {
+  id             String             @id @default(uuid())
+  ticketId       String
+  ticket         SupportTicket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  fileName       String
+  fileUrl        String
+  fileType       String             // IMAGE, PDF, DOC, CSV
+  fileSize       Int
+  createdAt      DateTime           @default(now())
+}
+
+/// Live Chat Session
+model ChatSession {
+  id             String             @id @default(uuid())
+  tenantId       String
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId     String
+  customerName   String
+  customerRole   String
+  assignedAgentId String?
+  status         String             @default("ACTIVE") // ACTIVE, TRANSFERRED, RESOLVED, OFFLINE
+  department     String             @default("GENERAL")
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  messages       ChatMessage[]
+}
+
+/// Chat Message
+model ChatMessage {
+  id             String             @id @default(uuid())
+  sessionId      String
+  session        ChatSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  senderId       String
+  senderName     String
+  senderRole     String             // AGENT, CUSTOMER
+  message        String             @db.Text
+  fileUrl        String?
+  fileType       String?
+  isRead         Boolean            @default(false)
+  createdAt      DateTime           @default(now())
+}
+
+/// Knowledge Base Article
+model KnowledgeBaseArticle {
+  id             String             @id @default(uuid())
+  tenantId       String
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  title          String
+  content        String             @db.Text
+  category       String             // WALLET_GUIDE, SECURITY, TRANSACTION_TROUBLE, FAQ
+  popular        Boolean            @default(false)
+  videoUrl       String?
+  helpfulCount   Int                @default(0)
+  unhelpfulCount Int                @default(0)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+}
+
+/// FAQ Category
+model FaqCategory {
+  id             String             @id @default(uuid())
+  tenantId       String
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  displayOrder   Int                @default(0)
+  createdAt      DateTime           @default(now())
+}
+
+/// Notification Template for Omni-Channel CRM Messaging
+model NotificationTemplate {
+  id             String             @id @default(uuid())
+  tenantId       String
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name           String             // e.g. ticket_created_alert
+  channel        String             // PUSH, SMS, EMAIL, WHATSAPP
+  subject        String?
+  body           String             @db.Text
+  segment        String             @default("ALL") // ALL, RETAILERS, FRANCHISES, DISTRIBUTORS
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+}
+
+/// Customer Feedback / CSAT Surveys
+model CustomerFeedback {
+  id             String             @id @default(uuid())
+  tenantId       String
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId     String
+  entityType     String             // TICKET, CHAT, TRANSACTION
+  entityId       String
+  rating         Int                // 1 to 5 stars
+  comments       String?            @db.Text
+  createdAt      DateTime           @default(now())
+}
+
+/// SLA Rule Definition per Tenant
+model SlaRule {
+  id             String             @id @default(uuid())
+  tenantId       String
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  priority       String             // LOW, MEDIUM, HIGH, URGENT
+  resolutionHours Int               // Max hours allowed to resolve
+  escalationAgentId String?         // Agent to escalate if breached
+  createdAt      DateTime           @default(now())
+}
+
+/// Financial Account (Chart of Accounts)
+model FinancialAccount {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code        String   // e.g., 1010, 2010
+  name        String   // e.g., Cash, Bank, Accounts Receivable, IGST Output
+  type        String   // ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE
+  currency    String   @default("INR")
+  balance     Decimal  @default(0.0) @db.Decimal(18, 4)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  journalItems JournalItem[]
+
+  @@unique([tenantId, code])
+}
+
+/// Journal Entry representing a financial double entry transaction
+model JournalEntry {
+  id              String        @id @default(uuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  entryNumber     String        @unique // JE-1001
+  reference       String?       // e.g. Invoice ID, Expense ID
+  description     String
+  postingDate     DateTime      @default(now())
+  financialYear   String        // e.g., FY-2026-27
+  status          String        @default("DRAFT") // DRAFT, POSTED, REJECTED (Maker-Checker support)
+  createdBy       String
+  approvedBy      String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  items           JournalItem[]
+}
+
+/// Journal Item representing a debit/credit line
+model JournalItem {
+  id              String           @id @default(uuid())
+  entryId         String
+  entry           JournalEntry     @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  accountId       String
+  account         FinancialAccount @relation(fields: [accountId], references: [id])
+  debit           Decimal          @default(0.0) @db.Decimal(18, 4)
+  credit          Decimal          @default(0.0) @db.Decimal(18, 4)
+  description     String?
+  createdAt       DateTime         @default(now())
+}
+
+/// GST Invoice Table
+model GstInvoice {
+  id              String        @id @default(uuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoiceNumber   String        @unique // INV-2026-1001
+  invoiceType     String        // TAX_INVOICE, PROFORMA_INVOICE, RETAIL_INVOICE, PURCHASE_INVOICE
+  customerId      String
+  customerName    String
+  customerGstin   String?
+  customerAddress String?
+  placeOfSupply   String        // State name for IGST vs CGST/SGST routing
+  totalTaxableVal Decimal       @db.Decimal(18, 4)
+  cgst            Decimal       @default(0.0) @db.Decimal(18, 4)
+  sgst            Decimal       @default(0.0) @db.Decimal(18, 4)
+  igst            Decimal       @default(0.0) @db.Decimal(18, 4)
+  utgst           Decimal       @default(0.0) @db.Decimal(18, 4)
+  grandTotal      Decimal       @db.Decimal(18, 4)
+  status          String        @default("UNPAID") // UNPAID, PAID, CANCELLED
+  qrCodeUrl       String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  items           GstInvoiceItem[]
+}
+
+/// Invoice items carrying HSN/SAC codes and GST percentages
+model GstInvoiceItem {
+  id              String     @id @default(uuid())
+  invoiceId       String
+  invoice         GstInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description     String
+  hsnSacCode      String     // e.g., 998311 for FinTech SaaS
+  quantity        Int        @default(1)
+  unitPrice       Decimal    @db.Decimal(18, 4)
+  taxRatePercent  Decimal    @default(18.0) @db.Decimal(5, 2) // e.g. 18.00%
+  taxableValue    Decimal    @db.Decimal(18, 4)
+  taxAmount       Decimal    @db.Decimal(18, 4)
+  totalValue      Decimal    @db.Decimal(18, 4)
+}
+
+/// Credit Notes and Debit Notes
+model FinAdjustmentNote {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  noteNumber      String   @unique // CN-1001, DN-1001
+  noteType        String   // CREDIT_NOTE, DEBIT_NOTE
+  referenceInvoice String?  // e.g. GstInvoice invoiceNumber
+  customerId      String
+  customerName    String
+  reason          String
+  taxableValue    Decimal  @db.Decimal(18, 4)
+  gstAmount       Decimal  @db.Decimal(18, 4)
+  totalValue      Decimal  @db.Decimal(18, 4)
+  createdAt       DateTime @default(now())
+}
+
+/// Expense Tracking Model
+model FinExpense {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category        String   // MARKETING, OFFICE, TRAVEL, TECH_INFRA, REIMBURSEMENT
+  amount          Decimal  @db.Decimal(18, 4)
+  currency        String   @default("INR")
+  description     String
+  status          String   @default("PENDING") // PENDING, APPROVED, REJECTED, PAID (Maker-Checker)
+  claimedBy       String   // Employee Name / User ID
+  approvedBy      String?
+  vendorName      String?
+  isRecurring     Boolean  @default(false)
+  recurrenceCron  String?
+  invoiceUrl      String?
+  paymentDate     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+/// Corporate Budget Allocations
+model FinBudget {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category        String   // Category mapping
+  allocatedAmount Decimal  @db.Decimal(18, 4)
+  spentAmount     Decimal  @default(0.0) @db.Decimal(18, 4)
+  fiscalYear      String   // e.g. FY-2026-27
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([tenantId, category, fiscalYear])
+}
+
+/// Financial Audit & KYC Compliance Logs
+model ComplianceRecord {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  recordType      String   // KYC_REVIEW, AML_ALERT, RISK_SCORE, TRANSACTION_MONITOR
+  status          String   // APPROVED, SUSPICIOUS, INVESTIGATING, CLEAR
+  entityId        String?  // Customer, Retailer, or Txn Reference ID
+  description     String   @db.Text
+  riskScore       Decimal? @db.Decimal(5, 2) // 0 to 100 risk rating
+  investigator    String?
+  createdAt       DateTime @default(now())
+}
+
+/// Security Incident and Threat events
+model SecurityEvent {
+  id              String   @id @default(uuid())
+  tenantId        String
+  userId          String?
+  eventType       String   // THREAT, INTRUSION, ANOMALY, FAILED_LOGIN, WALLET_FRAUD, CREDIT_ABUSE
+  severity        String   // LOW, MEDIUM, HIGH, CRITICAL
+  status          String   @default("OPEN") // OPEN, UNDER_INVESTIGATION, RESOLVED, IGNORED
+  sourceIp        String?
+  userAgent       String?
+  description     String   @db.Text
+  details         String?  @db.Text // JSON string
+  remediation     String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+/// Active and historical user login sessions
+model LoginSession {
+  id              String   @id @default(uuid())
+  tenantId        String
+  userId          String
+  email           String
+  tokenHash       String?
+  mfaVerified     Boolean  @default(false)
+  mpinUsed        Boolean  @default(false)
+  biometricUsed   Boolean  @default(false)
+  ipAddress       String
+  userAgent       String?
+  location        String?
+  deviceFingerprint String?
+  isActive        Boolean  @default(true)
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+/// Registered and tracked devices per user
+model Device {
+  id                String   @id @default(uuid())
+  tenantId          String
+  userId            String
+  deviceName        String
+  deviceType        String   // MOBILE, TABLET, DESKTOP
+  osVersion         String?
+  pushToken         String?
+  fingerprint       String   @unique
+  status            String   @default("ACTIVE") // ACTIVE, REVOKED, BLOCKED
+  lastActiveIp      String?
+  lastActiveAt      DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+/// Trusted Devices for bypass/faster auth
+model TrustedDevice {
+  id              String   @id @default(uuid())
+  tenantId        String
+  userId          String
+  deviceId        String
+  deviceName      String
+  fingerprint     String
+  trustedUntil    DateTime
+  createdAt       DateTime @default(now())
+}
+
+/// API Keys for B2B developer integrations
+model ApiKey {
+  id              String   @id @default(uuid())
+  tenantId        String
+  name            String
+  keyPrefix       String   // e.g., sc_live_
+  keyHash         String   @unique
+  scopes          String   @default("*") // comma separated scopes
+  ipWhitelist     String?  // comma separated IPs or CIDRs
+  rateLimitRps    Int      @default(10)
+  isActive        Boolean  @default(true)
+  expiresAt       DateTime?
+  lastUsedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+/// Access logs for API Gateway auditing
+model AccessLog {
+  id              String   @id @default(uuid())
+  tenantId        String?
+  apiKeyId        String?
+  userId          String?
+  method          String
+  path            String
+  statusCode      Int
+  responseTimeMs  Int
+  ipAddress       String
+  userAgent       String?
+  requestSize     Int      @default(0)
+  responseSize    Int      @default(0)
+  createdAt       DateTime @default(now())
+}
+
+/// System execution and audit logs
+model SystemLog {
+  id              String   @id @default(uuid())
+  tenantId        String?
+  level           String   // INFO, WARN, ERROR, DEBUG
+  module          String   // GATEWAY, WALLET, AUTH, LEDGER, COMPLIANCE
+  message         String   @db.Text
+  stackTrace      String?  @db.Text
+  metadata        String?  @db.Text // JSON string
+  createdAt       DateTime @default(now())
+}
+
+/// Real-time health and telemetry metrics
+model MonitoringMetric {
+  id              String   @id @default(uuid())
+  metricName      String   // CPU_USAGE, MEM_USAGE, REDIS_LATENCY, QUEUE_SIZE, RESP_TIME
+  metricValue     Float
+  serviceName     String   // API_GATEWAY, BACKEND, REDIS, WORKER
+  metadata        String?  // JSON string e.g., { host: "ip-10-0-1-1" }
+  createdAt       DateTime @default(now())
+}
+
+/// Backup and snapshot execution records
+model BackupJob {
+  id              String   @id @default(uuid())
+  backupType      String   // FULL, INCREMENTAL
+  status          String   // PENDING, IN_PROGRESS, COMPLETED, FAILED
+  filePath        String?
+  fileSize        BigInt?
+  encryptionKeyId String?
+  verified        Boolean  @default(false)
+  verificationLog String?  @db.Text
+  durationMs      Int      @default(0)
+  error           String?  @db.Text
+  createdAt       DateTime @default(now())
+  completedAt     DateTime?
+}
+
+/// Disaster Recovery testing and continuity records
+model DrRecord {
+  id              String   @id @default(uuid())
+  scenarioName    String   // DB_FAILOVER, REGION_DOWN, REDIS_CRASH
+  status          String   // SCHEDULED, IN_PROGRESS, SUCCESS, FAILED
+  recoveryTimeMs  Int      @default(0) // Actual Recovery Time Objective (RTO) achieved
+  dataLossSeconds Int      @default(0) // Actual Recovery Point Objective (RPO) achieved
+  runbookExecuted String   @db.Text
+  verificationLog String   @db.Text
+  testedBy        String
+  createdAt       DateTime @default(now())
+}
+
