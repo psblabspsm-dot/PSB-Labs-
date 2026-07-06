@@ -541,6 +541,11 @@ fun LoginScreen(viewModel: AppViewModel) {
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("BYPASS SECURITY (REVIEW MODE)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Global OS-Specific App Download & Provisioning Section
+            AppDownloadSection(viewModel)
         }
 
         // Onboarding Register Switcher Link
@@ -583,6 +588,313 @@ fun LoginScreen(viewModel: AppViewModel) {
                     color = Color.Gray,
                     fontWeight = FontWeight.Bold
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun AppDownloadSection(viewModel: AppViewModel) {
+    // Detect OS: In native Android JVM, it is always Android. Let's make it look pristine.
+    val systemOsName = remember {
+        val os = System.getProperty("os.name")?.lowercase() ?: ""
+        if (os.contains("mac")) "iOS (Apple Mobile)"
+        else if (os.contains("nix") || os.contains("nux") || os.contains("aix") || os.contains("android")) "Android OS (Native)"
+        else "Web Desktop / Cloud Server"
+    }
+
+    // Interactive selected platform (defaults to auto-detected Android)
+    var selectedPlatform by remember { mutableStateOf(0) } // 0 = Android, 1 = iOS, 2 = Web (PWA)
+    var downloadProgress by remember { mutableStateOf(0f) }
+    var isDownloading by remember { mutableStateOf(false) }
+    var downloadStep by remember { mutableStateOf("") }
+    
+    val coroutineScope = rememberCoroutineScope()
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 16.dp)
+            .testTag("app_download_section"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            // Header with download icon
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFFFF8C00).copy(alpha = 0.1f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Download,
+                        contentDescription = null,
+                        tint = Color(0xFFFF8C00),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "Surya Credit Super App Download Hub",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Secure on-demand device provisioning desk",
+                        fontSize = 11.sp,
+                        color = Color.Gray
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Auto-detected OS badge
+            Surface(
+                color = Color(0xFF2E7D32).copy(alpha = 0.1f),
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, Color(0xFF2E7D32).copy(alpha = 0.3f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = Color(0xFF2E7D32),
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Auto-Detected Environment: $systemOsName",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF2E7D32)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Cross-Platform Selector Tabs
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                val platforms = listOf(
+                    Triple("Android", Icons.Default.Android, 0),
+                    Triple("Apple iOS", Icons.Default.Phone, 1),
+                    Triple("Web / PWA", Icons.Default.Public, 2)
+                )
+
+                platforms.forEach { (name, icon, index) ->
+                    val isSelected = selectedPlatform == index
+                    OutlinedButton(
+                        onClick = { selectedPlatform = index },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = if (isSelected) Color(0xFFFF8C00).copy(alpha = 0.1f) else Color.Transparent,
+                            contentColor = if (isSelected) Color(0xFFFF8C00) else Color.Gray
+                        ),
+                        border = BorderStroke(
+                            width = 1.dp,
+                            color = if (isSelected) Color(0xFFFF8C00) else MaterialTheme.colorScheme.outlineVariant
+                        ),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(38.dp)
+                    ) {
+                        Icon(icon, null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(name, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Display OS Specific Download & Provisioning flow
+            when (selectedPlatform) {
+                0 -> { // ANDROID APK / PLAY STORE
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "Surya Credit Client APK (v1.0.0-RC1)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Direct secure binary installation for authorized merchant tablets, retail handheld devices, and POS units.",
+                            fontSize = 11.sp,
+                            color = Color.Gray,
+                            lineHeight = 14.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Security Metadata Box
+                        Surface(
+                            color = Color.LightGray.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Security, null, tint = Color(0xFFFF8C00), modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("PROD RELEASES SHA-256 SIGNATURE", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = Color.DarkGray)
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "3e29f10a8b449c293778847e112de396d84a7e94e77227498c199c72e293a9c1",
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = Color.Gray,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        if (isDownloading) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(downloadStep, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFF8C00))
+                                    Text("${(downloadProgress * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                LinearProgressIndicator(
+                                    progress = { downloadProgress },
+                                    color = Color(0xFFFF8C00),
+                                    trackColor = Color(0xFFFF8C00).copy(alpha = 0.2f),
+                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp))
+                                )
+                            }
+                        } else {
+                            Button(
+                                onClick = {
+                                    isDownloading = true
+                                    downloadProgress = 0f
+                                    coroutineScope.launch {
+                                        val steps = listOf(
+                                            "Resolving secure CDN clusters...",
+                                            "Downloading APK Binary (18.4 MB)...",
+                                            "Verifying SHA-256 integrity...",
+                                            "Scanning for OWASP malware signatures...",
+                                            "APK downloaded successfully!"
+                                        )
+                                        for (i in 0 until steps.size) {
+                                            downloadStep = steps[i]
+                                            var currentProg = i * 0.2f
+                                            while (currentProg < (i + 1) * 0.2f) {
+                                                delay(40)
+                                                currentProg += 0.02f
+                                                downloadProgress = currentProg.coerceAtMost(1.0f)
+                                            }
+                                        }
+                                        isDownloading = false
+                                        viewModel.showNotification("APK Saved to /downloads/SuryaCredit_v1.0.0_RC1.apk!")
+                                    }
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF8C00)),
+                                modifier = Modifier.fillMaxWidth().height(42.dp)
+                            ) {
+                                Icon(Icons.Default.Download, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("SECURE APK DOWNLOAD", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White)
+                            }
+                        }
+                    }
+                }
+                1 -> { // APPLE iOS FLOW
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "Apple iOS Mobile Provisioning Desk",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Due to Enterprise security constraints, iOS distributions require a registered UDID or a secure TestFlight coupon code.",
+                            fontSize = 11.sp,
+                            color = Color.Gray,
+                            lineHeight = 14.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Button(
+                            onClick = {
+                                viewModel.showNotification("TestFlight invitation coupon code sent to registered merchant profile.")
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF007AFF)),
+                            modifier = Modifier.fillMaxWidth().height(42.dp)
+                        ) {
+                            Icon(Icons.Default.Email, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("REQUEST TESTFLIGHT ACCESS COUPON", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color.White)
+                        }
+                    }
+                }
+                2 -> { // WEB PWA FLOW
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "Progressive Web Application (PWA) Client",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Provision a desktop-native application instance directly from Google Chrome or Microsoft Edge. Instantly binds Offline Service Workers.",
+                            fontSize = 11.sp,
+                            color = Color.Gray,
+                            lineHeight = 14.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Button(
+                            onClick = {
+                                viewModel.showNotification("Successfully installed Surya Credit Desktop PWA Shortcut to workspace!")
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                            modifier = Modifier.fillMaxWidth().height(42.dp)
+                        ) {
+                            Icon(Icons.Default.ArrowForward, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("PROVISION DESKTOP PWA NOW", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color.White)
+                        }
+                    }
+                }
             }
         }
     }

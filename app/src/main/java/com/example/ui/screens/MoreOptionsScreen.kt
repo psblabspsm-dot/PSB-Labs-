@@ -53,7 +53,8 @@ enum class MoreSubScreen {
     REPORTS_CENTER,
     AUDIT_COMPLIANCE,
     PARTNER_API_HUB,
-    PARTNER_BUSINESS_NETWORK
+    PARTNER_BUSINESS_NETWORK,
+    EMPLOYEE_HRMS
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -88,6 +89,7 @@ fun MoreOptionsScreen(viewModel: AppViewModel, modifier: Modifier = Modifier) {
             MoreSubScreen.AUDIT_COMPLIANCE -> AuditLogsComplianceScreen(onBack = { activeSubScreen = MoreSubScreen.MENU })
             MoreSubScreen.PARTNER_API_HUB -> PartnerApiHubScreen(viewModel, onBack = { activeSubScreen = MoreSubScreen.MENU })
             MoreSubScreen.PARTNER_BUSINESS_NETWORK -> BusinessNetworkManagementScreen(viewModel, onBack = { activeSubScreen = MoreSubScreen.MENU })
+            MoreSubScreen.EMPLOYEE_HRMS -> EmployeeHrmsScreen(viewModel, onBack = { activeSubScreen = MoreSubScreen.MENU })
         }
     }
 }
@@ -370,6 +372,20 @@ fun MoreMenuGrid(viewModel: AppViewModel, onNavigate: (MoreSubScreen) -> Unit) {
                         onClick = { onNavigate(MoreSubScreen.PARTNER_BUSINESS_NETWORK) },
                         modifier = Modifier.weight(1f)
                     )
+                }
+            }
+
+            item {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    MenuGridCard(
+                        title = "Employee HRMS",
+                        desc = "Digital ID, Payslips & Payroll",
+                        icon = Icons.Default.Badge,
+                        color = Color(0xFF673AB7),
+                        onClick = { onNavigate(MoreSubScreen.EMPLOYEE_HRMS) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
                 }
             }
 

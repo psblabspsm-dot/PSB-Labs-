@@ -1118,3 +1118,162 @@ model DrRecord {
   createdAt       DateTime @default(now())
 }
 
+/// HRMS Employee Master
+model HrmsEmployee {
+  id                  String   @id @default(uuid())
+  employeeCode        String   @unique
+  fullName            String
+  photo               String?  // String URL or base64 representation
+  designation         String
+  department          String
+  branch              String
+  reportingManager    String?
+  mobileNumber        String
+  email               String   @unique
+  aadhaarNumberMasked String
+  panNumberMasked     String
+  dateOfJoining       DateTime
+  dateOfBirth         DateTime
+  bloodGroup          String?
+  address             String   @db.Text
+  emergencyContact    String
+  employmentType      String   // FULL_TIME, CONTRACT, INTERN, PART_TIME
+  bankAccountDetails  String
+  ifscCode            String
+  uan                 String?
+  esicNumber          String?
+  pfNumber            String?
+  status              String   @default("ACTIVE") // ACTIVE, INACTIVE
+  
+  // Relations
+  idCard              HrmsEmployeeIdCard?
+  documents           HrmsEmployeeDocument[]
+  salaryRevisions     HrmsSalaryRevision[]
+  salaryStructure     HrmsSalaryStructure?
+  attendance          HrmsAttendance[]
+  leaveRecords        HrmsLeaveRecord[]
+  payslips            HrmsPayslip[]
+  payroll             HrmsPayroll[]
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model HrmsEmployeeDocument {
+  id          String       @id @default(uuid())
+  employeeId  String
+  employee    HrmsEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  docType     String       // AADHAAR, PAN, JOINING_LETTER, HIGHEST_DEGREE
+  docUrl      String
+  verified    Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+}
+
+model HrmsEmployeeIdCard {
+  id           String       @id @default(uuid())
+  employeeId   String       @unique
+  employee     HrmsEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  cardNo       String       @unique
+  qrCode       String       @db.Text
+  barcode      String?      @db.Text
+  signatureUrl String?
+  authSigUrl   String?
+  issueDate    DateTime     @default(now())
+  validTill    DateTime
+  tamperProof  String       // JWT or digital signature digest
+  createdAt    DateTime     @default(now())
+}
+
+model HrmsSalaryStructure {
+  id               String       @id @default(uuid())
+  employeeId       String       @unique
+  employee         HrmsEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  basicSalary      Decimal      @db.Decimal(15, 2)
+  hra              Decimal      @db.Decimal(15, 2)
+  specialAllowance Decimal      @db.Decimal(15, 2)
+  incentive        Decimal      @db.Decimal(15, 2) @default(0.00)
+  bonus            Decimal      @db.Decimal(15, 2) @default(0.00)
+  overtime         Decimal      @db.Decimal(15, 2) @default(0.00)
+  reimbursements   Decimal      @db.Decimal(15, 2) @default(0.00)
+  pf               Decimal      @db.Decimal(15, 2) @default(0.00) // Deduction
+  esic             Decimal      @db.Decimal(15, 2) @default(0.00) // Deduction
+  professionalTax  Decimal      @db.Decimal(15, 2) @default(0.00) // Deduction
+  incomeTax        Decimal      @db.Decimal(15, 2) @default(0.00) // Deduction
+  netSalary        Decimal      @db.Decimal(15, 2)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
+
+model HrmsAttendance {
+  id         String       @id @default(uuid())
+  employeeId String
+  employee   HrmsEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date       DateTime
+  status     String       // PRESENT, ABSENT, HALF_DAY, LEAVE
+  checkIn    DateTime?
+  checkOut   DateTime?
+  hoursWorked Decimal?    @db.Decimal(5, 2)
+  createdAt  DateTime     @default(now())
+}
+
+model HrmsLeaveRecord {
+  id         String       @id @default(uuid())
+  employeeId String
+  employee   HrmsEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType  String       // CASUAL, SICK, MATERNITY, PATERNITY, LOSS_OF_PAY
+  startDate  DateTime
+  endDate    DateTime
+  status     String       // PENDING, APPROVED, REJECTED
+  reason     String       @db.Text
+  createdAt  DateTime     @default(now())
+}
+
+model HrmsPayroll {
+  id          String       @id @default(uuid())
+  employeeId  String
+  employee    HrmsEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  month       String       // e.g. "2026-06"
+  workingDays Int
+  presentDays Int
+  leaveDays   Int
+  grossSalary Decimal      @db.Decimal(15, 2)
+  deductions  Decimal      @db.Decimal(15, 2)
+  netPaid     Decimal      @db.Decimal(15, 2)
+  status      String       // DRAFT, APPROVED, PAID
+  paidAt      DateTime?
+  createdAt   DateTime     @default(now())
+}
+
+model HrmsPayslip {
+  id           String       @id @default(uuid())
+  employeeId   String
+  employee     HrmsEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  payslipNo    String       @unique
+  month        String       // e.g. "2026-06"
+  workingDays  Int
+  presentDays  Int
+  leaveDays    Int
+  basicSalary  Decimal      @db.Decimal(15, 2)
+  hra          Decimal      @db.Decimal(15, 2)
+  allowances   Decimal      @db.Decimal(15, 2)
+  incentives   Decimal      @db.Decimal(15, 2) @default(0.00)
+  deductions   Decimal      @db.Decimal(15, 2)
+  netSalary    Decimal      @db.Decimal(15, 2)
+  qrCode       String       @db.Text
+  signatureUrl String?
+  paymentRef   String?
+  createdAt    DateTime     @default(now())
+}
+
+model HrmsSalaryRevision {
+  id          String       @id @default(uuid())
+  employeeId  String
+  employee    HrmsEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  prevSalary  Decimal      @db.Decimal(15, 2)
+  newSalary   Decimal      @db.Decimal(15, 2)
+  effectiveFrom DateTime
+  reason      String       @db.Text
+  createdAt   DateTime     @default(now())
+}
+
+

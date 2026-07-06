@@ -38,6 +38,9 @@ import { FinanceModule } from './finance/finance.module';
 // Security Operations, IAM, Monitoring & DR Subsystem
 import { SecurityModule } from './security/security.module';
 
+// Employee HRMS & Payroll Subsystem
+import { HrmsModule } from './hrms/hrms.module';
+
 // Enterprise Logging Suite
 import { CorrelationIdMiddleware } from './common/logging/correlation-id.middleware';
 import { WinstonLogger } from './common/logging/winston.logger';
@@ -74,6 +77,9 @@ import { SentryService } from './common/logging/sentry.service';
 
     // Security operations core
     SecurityModule,
+
+    // Employee HRMS & Payroll
+    HrmsModule,
   ],
   controllers: [
     AuthController,
